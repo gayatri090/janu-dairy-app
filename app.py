@@ -1,6 +1,8 @@
 from flask import Flask, request
 import sqlite3
 import pdfplumber
+import smtplib
+from email.mime.text import MIMEText
 
 app = Flask(__name__)
 
@@ -21,6 +23,16 @@ def init_db():
         base_price REAL,
         gst REAL,
         discount REAL
+    )
+    """)
+
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer TEXT,
+        amount REAL,
+        email TEXT,
+        status TEXT
     )
     """)
 
@@ -73,6 +85,28 @@ def extract_items_from_pdf(file):
 
 
 # -----------------------------
+# Email Sender
+# -----------------------------
+def send_email(to_email, amount):
+    sender = "your_email@gmail.com"
+    password = "your_app_password"
+
+    msg = MIMEText(f"Payment reminder: You have pending amount ₹{amount}")
+    msg["Subject"] = "Payment Reminder"
+    msg["From"] = sender
+    msg["To"] = to_email
+
+    try:
+        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+        server.login(sender, password)
+        server.sendmail(sender, to_email, msg.as_string())
+        server.quit()
+        return True
+    except:
+        return False
+
+
+# -----------------------------
 # Home
 # -----------------------------
 @app.route("/")
@@ -80,7 +114,8 @@ def home():
     return """
     <h1>Janu Dairy App</h1>
     <a href="/purchase">Upload Purchase PDF</a><br><br>
-    <a href="/sale">Upload Sale PDF</a>
+    <a href="/sale">Upload Sale PDF</a><br><br>
+    <a href="/reminders">Send Payment Reminders</a>
     """
 
 
@@ -138,21 +173,27 @@ def purchase():
 
 
 # -----------------------------
-# Sale Upload + Purchase display
+# Sale Upload + Profit
 # -----------------------------
 @app.route("/sale", methods=["GET", "POST"])
 def sale():
     if request.method == "POST":
         file = request.files["pdf"]
+        customer = request.form.get("customer", "Unknown")
+        email = request.form.get("email", "")
+
         sale_items = extract_items_from_pdf(file)
 
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
 
         total_profit = 0
+        total_amount = 0
         rows = ""
 
         for item, sale_price in sale_items:
+            total_amount += sale_price
+
             cursor.execute("""
                 SELECT base_price, gst, discount
                 FROM purchase
@@ -165,9 +206,11 @@ def sale():
             if row:
                 base_price, gst, discount = row
 
+                # Purchase values
                 purchase_no_gst = base_price * (1 - discount/100)
                 purchase_with_gst = purchase_no_gst * (1 + gst/100)
 
+                # Sale values
                 sale_no_gst = sale_price * (1 - discount/100)
                 sale_with_gst = sale_no_gst * (1 + gst/100)
 
@@ -191,6 +234,13 @@ def sale():
             </tr>
             """
 
+        # Save payment
+        cursor.execute("""
+            INSERT INTO payments (customer, amount, email, status)
+            VALUES (?, ?, ?, ?)
+        """, (customer, total_amount, email, "pending"))
+
+        conn.commit()
         conn.close()
 
         return f"""
@@ -213,12 +263,45 @@ def sale():
     return """
     <h2>Upload Sale PDF</h2>
     <form method="post" enctype="multipart/form-data">
+        Customer Name: <input type="text" name="customer"><br><br>
+        Customer Email: <input type="text" name="email"><br><br>
         <input type="file" name="pdf">
         <button type="submit">Upload</button>
     </form>
     """
 
 
+# -----------------------------
+# Payment Reminders
+# -----------------------------
+@app.route("/reminders")
+def reminders():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT customer, amount, email FROM payments WHERE status='pending'")
+    rows = cursor.fetchall()
+
+    result = ""
+
+    for customer, amount, email in rows:
+        if email:
+            success = send_email(email, amount)
+            if success:
+                result += f"Reminder sent to {customer} ({email})<br>"
+            else:
+                result += f"Failed to send to {customer}<br>"
+        else:
+            result += f"No email for {customer}<br>"
+
+    conn.close()
+
+    return f"""
+    <h2>Reminder Results</h2>
+    {result}
+    <br>
+    <a href="/">Back</a>
+    """
 
 
 # -----------------------------
