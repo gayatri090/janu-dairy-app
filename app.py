@@ -115,6 +115,7 @@ def home():
     <h1>Janu Dairy App</h1>
     <a href="/purchase">Upload Purchase PDF</a><br><br>
     <a href="/sale">Upload Sale PDF</a><br><br>
+    <a href="/payments">Customer Payments</a><br><br>
     <a href="/reminders">Send Payment Reminders</a>
     """
 
@@ -261,6 +262,7 @@ def sale():
         <a href="/">Back</a>
         """
 
+
     return """
     <h2>Upload Sale PDF</h2>
     <form method="post" enctype="multipart/form-data">
@@ -269,6 +271,76 @@ def sale():
         <input type="file" name="pdf">
         <button type="submit">Upload</button>
     </form>
+    """
+
+
+# -----------------------------
+# Customer Payment Screen
+# -----------------------------
+@app.route("/payments")
+def payments():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT id, customer, amount, status FROM payments")
+    rows = cursor.fetchall()
+
+    table_rows = ""
+    for row in rows:
+        payment_id, customer, amount, status = row
+
+        if status == "pending":
+            action = f'<a href="/mark_paid/{payment_id}">Mark Paid</a>'
+        else:
+            action = "Paid"
+
+        table_rows += f"""
+        <tr>
+            <td>{customer}</td>
+            <td>{amount}</td>
+            <td>{status}</td>
+            <td>{action}</td>
+        </tr>
+        """
+
+    conn.close()
+
+    return f"""
+    <h2>Customer Payments</h2>
+    <table border="1" cellpadding="8">
+        <tr>
+            <th>Customer</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th>Action</th>
+        </tr>
+        {table_rows}
+    </table>
+    <br>
+    <a href="/">Back</a>
+    """
+
+
+# -----------------------------
+# Mark Payment as Paid
+# -----------------------------
+@app.route("/mark_paid/<int:payment_id>")
+def mark_paid(payment_id):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    cursor.execute("""
+        UPDATE payments
+        SET status='paid'
+        WHERE id=?
+    """, (payment_id,))
+
+    conn.commit()
+    conn.close()
+
+    return """
+    <h2>Payment marked as paid</h2>
+    <a href="/payments">Back to Payments</a>
     """
 
 
