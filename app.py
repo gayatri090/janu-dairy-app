@@ -112,7 +112,7 @@ def send_email(to_email, amount):
 @app.route("/")
 def home():
     return """
-    <h1>Janu Dairy App</h1>
+    <h1>Jaanu_mm</h1>
     <a href="/purchase">Upload Purchase PDF</a><br><br>
     <a href="/sale">Upload Sale PDF</a><br><br>
     <a href="/payments">Customer Payments</a><br><br>
