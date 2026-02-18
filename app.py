@@ -206,17 +206,16 @@ def sale():
             if row:
                 base_price, gst, discount = row
 
-                # Purchase values
                 purchase_no_gst = base_price * (1 - discount/100)
                 purchase_with_gst = purchase_no_gst * (1 + gst/100)
 
-                # Sale values
                 sale_no_gst = sale_price * (1 - discount/100)
                 sale_with_gst = sale_no_gst * (1 + gst/100)
 
                 profit = sale_no_gst - purchase_no_gst
                 total_profit += profit
             else:
+                discount = 0
                 purchase_no_gst = 0
                 purchase_with_gst = 0
                 sale_no_gst = sale_price
@@ -226,6 +225,7 @@ def sale():
             rows += f"""
             <tr>
                 <td>{item}</td>
+                <td>{discount}</td>
                 <td>{round(purchase_no_gst,2)}</td>
                 <td>{round(purchase_with_gst,2)}</td>
                 <td>{round(sale_no_gst,2)}</td>
@@ -248,6 +248,7 @@ def sale():
         <table border="1" cellpadding="8">
             <tr>
                 <th>Item</th>
+                <th>Discount %</th>
                 <th>Purchase (No GST)</th>
                 <th>Purchase (With GST)</th>
                 <th>Sale (No GST)</th>
