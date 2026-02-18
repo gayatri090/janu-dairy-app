@@ -1,37 +1,40 @@
-from flask import Flask, request
+from flask import Flask, request, redirect, url_for, render_template_string
 import sqlite3
-import pdfplumber
-import smtplib
-from email.mime.text import MIMEText
+from datetime import datetime
 
 app = Flask(__name__)
+DB = "data.db"
 
-DB_NAME = "data.db"
-
-
-# -----------------------------
+# -------------------------
 # Database Setup
-# -----------------------------
+# -------------------------
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS purchase (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS purchase(
         item TEXT,
-        base_price REAL,
+        price REAL,
         gst REAL,
         discount REAL
     )
     """)
 
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS payments (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS sales(
+        item TEXT,
+        price REAL,
+        gst REAL,
+        discount REAL,
+        date TEXT
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS payments(
         customer TEXT,
         amount REAL,
-        email TEXT,
         status TEXT
     )
     """)
@@ -39,347 +42,264 @@ def init_db():
     conn.commit()
     conn.close()
 
+init_db()
 
-# -----------------------------
-# Price Change Checker
-# -----------------------------
-def check_price_change(cursor, item, new_price):
-    cursor.execute(
-        "SELECT base_price FROM purchase WHERE item=? ORDER BY id DESC LIMIT 1",
-        (item,))
-    row = cursor.fetchone()
-
-    if row:
-        old_price = row[0]
-        if old_price != new_price:
-            return old_price
-    return None
-
-
-# -----------------------------
-# PDF Extractor
-# -----------------------------
-def extract_items_from_pdf(file):
-    items = []
-
-    with pdfplumber.open(file) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            if not text:
-                continue
-
-            lines = text.split("\n")
-
-            for line in lines:
-                parts = line.split()
-
-                if len(parts) >= 2:
-                    item = parts[0]
-                    try:
-                        price = float(parts[-1])
-                        items.append((item, price))
-                    except:
-                        continue
-
-    return items
-
-
-# -----------------------------
-# Email Sender
-# -----------------------------
-def send_email(to_email, amount):
-    sender = "your_email@gmail.com"
-    password = "your_app_password"
-
-    msg = MIMEText(f"Payment reminder: You have pending amount ₹{amount}")
-    msg["Subject"] = "Payment Reminder"
-    msg["From"] = sender
-    msg["To"] = to_email
-
-    try:
-        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
-        server.login(sender, password)
-        server.sendmail(sender, to_email, msg.as_string())
-        server.quit()
-        return True
-    except:
-        return False
-
-
-# -----------------------------
-# Home
-# -----------------------------
+# -------------------------
+# HOME PAGE
+# -------------------------
 @app.route("/")
 def home():
-    return """
-    <h1>Jaanu_mm</h1>
-    <a href="/purchase">Upload Purchase PDF</a><br><br>
-    <a href="/sale">Upload Sale PDF</a><br><br>
-    <a href="/payments">Customer Payments</a><br><br>
-    <a href="/reminders">Send Payment Reminders</a>
-    """
+    return render_template_string("""
+    <html>
+    <head>
+        <style>
+            body {
+                font-family: Arial;
+                background: #f4f6f8;
+                text-align: center;
+            }
+            h1 {
+                background: #2c3e50;
+                color: white;
+                padding: 15px;
+                margin: 0;
+            }
+            .grid {
+                display: grid;
+                grid-template-columns: repeat(2, 1fr);
+                gap: 20px;
+                padding: 30px;
+            }
+            .card {
+                background: white;
+                padding: 20px;
+                border-radius: 12px;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+                text-decoration: none;
+                color: black;
+                font-size: 18px;
+            }
+            .icon {
+                font-size: 40px;
+            }
+        </style>
+    </head>
+    <body>
 
+    <h1>jaanu_mm</h1>
 
-# -----------------------------
-# Purchase Upload
-# -----------------------------
+    <div class="grid">
+        <a class="card" href="/purchase">
+            <div class="icon">📥</div>
+            Purchase Upload
+        </a>
+
+        <a class="card" href="/sale">
+            <div class="icon">📤</div>
+            Sale Upload
+        </a>
+
+        <a class="card" href="/payments">
+            <div class="icon">💰</div>
+            Customer Payments
+        </a>
+
+        <a class="card" href="/send_reminders">
+            <div class="icon">📧</div>
+            Send Reminders
+        </a>
+
+        <a class="card" href="/daily_profit">
+            <div class="icon">📊</div>
+            Daily Profit
+        </a>
+    </div>
+
+    </body>
+    </html>
+    """)
+
+# -------------------------
+# PURCHASE
+# -------------------------
 @app.route("/purchase", methods=["GET", "POST"])
 def purchase():
     if request.method == "POST":
-        file = request.files["pdf"]
-        items = extract_items_from_pdf(file)
+        item = request.form["item"]
+        price = float(request.form["price"])
+        gst = float(request.form["gst"])
+        discount = float(request.form["discount"])
 
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
+        conn = sqlite3.connect(DB)
+        c = conn.cursor()
 
-        alerts = []
-
-        for item, price in items:
-            gst = 5.0
-            discount = 0.0
-
-            old_price = check_price_change(cursor, item, price)
-            if old_price is not None:
-                alerts.append(f"{item}: {old_price} → {price}")
-
-            cursor.execute("""
-                INSERT INTO purchase (item, base_price, gst, discount)
-                VALUES (?, ?, ?, ?)
-            """, (item, price, gst, discount))
-
+        c.execute("DELETE FROM purchase WHERE item=?", (item,))
+        c.execute("INSERT INTO purchase VALUES (?,?,?,?)",
+                  (item, price, gst, discount))
         conn.commit()
         conn.close()
 
-        if alerts:
-            alert_text = "<br>".join(alerts)
-            return f"""
-            <h2>Price Change Alert</h2>
-            {alert_text}
-            <br><br>
-            <a href="/">Back</a>
-            """
-        else:
-            return """
-            <h2>Purchase saved. No price changes.</h2>
-            <a href="/">Back</a>
-            """
+        return redirect(url_for("home"))
 
     return """
-    <h2>Upload Purchase PDF</h2>
-    <form method="post" enctype="multipart/form-data">
-        <input type="file" name="pdf">
-        <button type="submit">Upload</button>
+    <h2>Upload Purchase</h2>
+    <form method="post">
+        Item: <input name="item"><br>
+        Price: <input name="price"><br>
+        GST %: <input name="gst"><br>
+        Discount: <input name="discount"><br>
+        <button>Save</button>
     </form>
     """
 
-
-# -----------------------------
-# Sale Upload + Profit
-# -----------------------------
+# -------------------------
+# SALE
+# -------------------------
 @app.route("/sale", methods=["GET", "POST"])
 def sale():
     if request.method == "POST":
-        file = request.files["pdf"]
-        customer = request.form.get("customer", "Unknown")
-        email = request.form.get("email", "")
+        item = request.form["item"]
+        sale_price = float(request.form["price"])
+        gst = float(request.form["gst"])
+        discount = float(request.form["discount"])
+        date = datetime.now().strftime("%Y-%m-%d")
 
-        sale_items = extract_items_from_pdf(file)
+        conn = sqlite3.connect(DB)
+        c = conn.cursor()
 
-        conn = sqlite3.connect(DB_NAME)
-        cursor = conn.cursor()
+        c.execute("SELECT price, gst, discount FROM purchase WHERE item=?", (item,))
+        row = c.fetchone()
 
-        total_profit = 0
-        total_amount = 0
-        rows = ""
+        if row:
+            purchase_price, p_gst, p_discount = row
+            purchase_final = purchase_price + (purchase_price * p_gst/100) - p_discount
+            sale_final = sale_price + (sale_price * gst/100) - discount
+            profit = sale_final - purchase_final
+        else:
+            profit = 0
 
-        for item, sale_price in sale_items:
-            total_amount += sale_price
-
-            cursor.execute("""
-                SELECT base_price, gst, discount
-                FROM purchase
-                WHERE item=?
-                ORDER BY id DESC
-                LIMIT 1
-            """, (item,))
-            row = cursor.fetchone()
-
-            if row:
-                base_price, gst, discount = row
-
-                purchase_no_gst = base_price * (1 - discount/100)
-                purchase_with_gst = purchase_no_gst * (1 + gst/100)
-
-                sale_no_gst = sale_price * (1 - discount/100)
-                sale_with_gst = sale_no_gst * (1 + gst/100)
-
-                profit = sale_no_gst - purchase_no_gst
-                total_profit += profit
-            else:
-                discount = 0
-                purchase_no_gst = 0
-                purchase_with_gst = 0
-                sale_no_gst = sale_price
-                sale_with_gst = sale_price
-                profit = 0
-
-            rows += f"""
-            <tr>
-                <td>{item}</td>
-                <td>{discount}</td>
-                <td>{round(purchase_no_gst,2)}</td>
-                <td>{round(purchase_with_gst,2)}</td>
-                <td>{round(sale_no_gst,2)}</td>
-                <td>{round(sale_with_gst,2)}</td>
-                <td>{round(profit,2)}</td>
-            </tr>
-            """
-
-        # Save payment
-        cursor.execute("""
-            INSERT INTO payments (customer, amount, email, status)
-            VALUES (?, ?, ?, ?)
-        """, (customer, total_amount, email, "pending"))
-
+        c.execute("INSERT INTO sales VALUES (?,?,?,?,?)",
+                  (item, sale_price, gst, discount, date))
         conn.commit()
         conn.close()
 
-        return f"""
-        <h2>Sale Invoice</h2>
-        <table border="1" cellpadding="8">
-            <tr>
-                <th>Item</th>
-                <th>Discount %</th>
-                <th>Purchase (No GST)</th>
-                <th>Purchase (With GST)</th>
-                <th>Sale (No GST)</th>
-                <th>Sale (With GST)</th>
-                <th>Profit</th>
-            </tr>
-            {rows}
-        </table>
-        <h2>Total Profit: {round(total_profit,2)}</h2>
-        <a href="/">Back</a>
-        """
-
+        return f"<h2>Profit for {item}: {profit}</h2><a href='/'>Back</a>"
 
     return """
-    <h2>Upload Sale PDF</h2>
-    <form method="post" enctype="multipart/form-data">
-        Customer Name: <input type="text" name="customer"><br><br>
-        Customer Email: <input type="text" name="email"><br><br>
-        <input type="file" name="pdf">
-        <button type="submit">Upload</button>
+    <h2>Upload Sale</h2>
+    <form method="post">
+        Item: <input name="item"><br>
+        Sale Price: <input name="price"><br>
+        GST %: <input name="gst"><br>
+        Discount: <input name="discount"><br>
+        <button>Calculate</button>
     </form>
     """
 
+# -------------------------
+# DAILY PROFIT REPORT
+# -------------------------
+@app.route("/daily_profit")
+def daily_profit():
+    today = datetime.now().strftime("%Y-%m-%d")
 
-# -----------------------------
-# Customer Payment Screen
-# -----------------------------
-@app.route("/payments")
-def payments():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
 
-    cursor.execute("SELECT id, customer, amount, status FROM payments")
-    rows = cursor.fetchall()
+    c.execute("SELECT item, price, gst, discount FROM sales WHERE date=?", (today,))
+    sales = c.fetchall()
 
-    table_rows = ""
-    for row in rows:
-        payment_id, customer, amount, status = row
-
-        if status == "pending":
-            action = f'<a href="/mark_paid/{payment_id}">Mark Paid</a>'
-        else:
-            action = "Paid"
-
-        table_rows += f"""
-        <tr>
-            <td>{customer}</td>
-            <td>{amount}</td>
-            <td>{status}</td>
-            <td>{action}</td>
-        </tr>
-        """
-
-    conn.close()
-
-    return f"""
-    <h2>Customer Payments</h2>
-    <table border="1" cellpadding="8">
-        <tr>
-            <th>Customer</th>
-            <th>Amount</th>
-            <th>Status</th>
-            <th>Action</th>
-        </tr>
-        {table_rows}
-    </table>
-    <br>
-    <a href="/">Back</a>
-    """
-
-
-# -----------------------------
-# Mark Payment as Paid
-# -----------------------------
-@app.route("/mark_paid/<int:payment_id>")
-def mark_paid(payment_id):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        UPDATE payments
-        SET status='paid'
-        WHERE id=?
-    """, (payment_id,))
-
-    conn.commit()
-    conn.close()
-
-    return """
-    <h2>Payment marked as paid</h2>
-    <a href="/payments">Back to Payments</a>
-    """
-
-
-# -----------------------------
-# Payment Reminders
-# -----------------------------
-@app.route("/reminders")
-def reminders():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT customer, amount, email FROM payments WHERE status='pending'")
-    rows = cursor.fetchall()
-
+    total_profit = 0
     result = ""
 
-    for customer, amount, email in rows:
-        if email:
-            success = send_email(email, amount)
-            if success:
-                result += f"Reminder sent to {customer} ({email})<br>"
-            else:
-                result += f"Failed to send to {customer}<br>"
-        else:
-            result += f"No email for {customer}<br>"
+    for s in sales:
+        item, sale_price, gst, discount = s
+
+        c.execute("SELECT price, gst, discount FROM purchase WHERE item=?", (item,))
+        row = c.fetchone()
+
+        if row:
+            purchase_price, p_gst, p_discount = row
+            purchase_final = purchase_price + (purchase_price * p_gst/100) - p_discount
+            sale_final = sale_price + (sale_price * gst/100) - discount
+            profit = sale_final - purchase_final
+            total_profit += profit
+            result += f"{item}: Profit {profit:.2f}<br>"
 
     conn.close()
 
     return f"""
-    <h2>Reminder Results</h2>
+    <h2>Daily Profit Report ({today})</h2>
     {result}
-    <br>
+    <h3>Total Profit: {total_profit:.2f}</h3>
     <a href="/">Back</a>
     """
 
+# -------------------------
+# PAYMENTS
+# -------------------------
+@app.route("/payments", methods=["GET", "POST"])
+def payments():
+    if request.method == "POST":
+        customer = request.form["customer"]
+        amount = request.form["amount"]
+        status = request.form["status"]
 
-# -----------------------------
-# Start App
-# -----------------------------
+        conn = sqlite3.connect(DB)
+        c = conn.cursor()
+        c.execute("INSERT INTO payments VALUES (?,?,?)",
+                  (customer, amount, status))
+        conn.commit()
+        conn.close()
+
+        return redirect(url_for("payments"))
+
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("SELECT * FROM payments")
+    rows = c.fetchall()
+    conn.close()
+
+    html = "<h2>Customer Payments</h2>"
+    html += """
+    <form method="post">
+        Customer: <input name="customer"><br>
+        Amount: <input name="amount"><br>
+        Status:
+        <select name="status">
+            <option>Pending</option>
+            <option>Paid</option>
+        </select><br>
+        <button>Save</button>
+    </form>
+    <hr>
+    """
+
+    for r in rows:
+        html += f"{r[0]} - {r[1]} - {r[2]}<br>"
+
+    html += "<br><a href='/'>Back</a>"
+    return html
+
+# -------------------------
+# REMINDERS
+# -------------------------
+@app.route("/send_reminders")
+def send_reminders():
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    c.execute("SELECT * FROM payments WHERE status='Pending'")
+    rows = c.fetchall()
+    conn.close()
+
+    for r in rows:
+        customer, amount, status = r
+        print(f"Reminder: {customer} owes {amount}")
+
+    return "<h3>Reminders sent</h3><a href='/'>Back</a>"
+
+# -------------------------
+# RUN
+# -------------------------
 if __name__ == "__main__":
-    init_db()
-    app.run(host="0.0.0.0", port=5000)
+    app.run(debug=True)
